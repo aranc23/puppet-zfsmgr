@@ -1,0 +1,17 @@
+{
+  "name": "aranc23-zfsmgr",
+  "version": "0.1.0",
+  "author": "Aran Cox",
+  "license": "Apache-2.0",
+  "summary": "install zfs_mgmt gem and configure zfsmgr",
+  "source": "https://github.com/aranc23/puppet-zfsmgr",
+  "dependencies": [],
+  "requirements": [
+    {
+      "name": "openvox",
+      "version_requirement": ">= 7.0.0 < 9.0.0"
+    }
+  ],
+  "operatingsystem_support": [],
+  "tags": []
+}
