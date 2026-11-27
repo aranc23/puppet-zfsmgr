@@ -57,7 +57,7 @@ class zfsmgr::service {
           'loglevel'   => 'info',
           'lock'       => true,
           'lock_file'  => undef,
-          'lock_wait'  => 1440,
+          'lock_wait'  => 14400,
           'extra_args' => undef,
           'command'    => undef,
         },
