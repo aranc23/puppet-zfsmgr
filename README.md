@@ -1,121 +1,164 @@
 # zfsmgr
 
-Welcome to your new module.
-You can read more about the parts of a module in the [module documentation][docs].
-
-See the [DevKit guide][devkit] for information on how to run the built in tests or to configure and use optional functionality.
-If you want to use the GitHub Changelog Generator, you'll need to check the configuration in the `Rakefile`.
-
-The README template below provides a starting point with details about what
-information to include in your README.
+Puppet module to install the `zfs_mgmt` RubyGem, manage `/etc/zfsmgr/*.toml` configuration files and `/var/lib/zfs_mgmt`, and schedule `zfsmgr` cron jobs.
 
 ## Table of Contents
 
 1. [Description](#description)
-1. [Setup - The basics of getting started with zfsmgr](#setup)
-    * [What zfsmgr affects](#what-zfsmgr-affects)
-    * [Setup requirements](#setup-requirements)
+1. [Setup](#setup)
+    * [Requirements](#requirements)
     * [Beginning with zfsmgr](#beginning-with-zfsmgr)
-1. [Usage - Configuration options and additional functionality](#usage)
-1. [Limitations - OS compatibility, etc.](#limitations)
-1. [Development - Guide for contributing to the module](#development)
+1. [Usage](#usage)
+    * [Basic usage](#basic-usage)
+    * [Configuring datasets via `$config`](#configuring-datasets-via-config)
+    * [Purging `/etc/zfsmgr` while keeping `99-local.toml`](#purging-etczfsmgr-while-keeping-99-localtoml)
+    * [Adding role/profile config snippets with `zfsmgr::config`](#adding-roleprofile-config-snippets-with-zfsmgrconfig)
+    * [Customizing cron schedules](#customizing-cron-schedules)
+1. [Reference](#reference)
 
 ## Description
 
-Briefly tell users why they might want to use your module. Explain what your
-module does and what kind of problems users can solve with it.
+`zfsmgr` automates the setup of [`zfs_mgmt`](https://github.com/aranc23/zfs_mgmt):
 
-This should be a fairly short description helps the user decide if your module
-is what they want.
+* **`zfsmgr::install`**: Installs the `zfs_mgmt` gem.
+* **`zfsmgr::configure`**: Manages `/etc/zfsmgr` (with optional directory purging), `/var/lib/zfs_mgmt` (for `send_state.pstore`), `/etc/zfsmgr/50-puppet.toml` rendered from `$zfsmgr::config`, and `/etc/zfsmgr/99-local.toml` created with `replace => false` so local edits are preserved.
+* **`zfsmgr::config`**: Defined type for adding `*.toml` configuration snippets under `/etc/zfsmgr` from roles/profiles.
+* **`zfsmgr::service`**: Manages cron jobs for `zfsmgr snapshot destroy`, `zfsmgr snapshot create`, and `zfsmgr send all`.
 
 ## Setup
 
-### What zfsmgr affects **OPTIONAL**
+### Requirements
 
-If it's obvious what your module touches, you can skip this section. For
-example, folks can probably figure out that your mysql_instance module affects
-their MySQL instances.
-
-If there's more that they should know about, though, this is the place to
-mention:
-
-* Files, packages, services, or operations that the module will alter, impact,
-  or execute.
-* Dependencies that your module automatically installs.
-* Warnings or other important notices.
-
-### Setup Requirements **OPTIONAL**
-
-If your module requires anything extra before setting up (pluginsync enabled,
-another module, etc.), mention it here.
-
-If your most recent release breaks compatibility or requires particular steps
-for upgrading, you might want to include an additional "Upgrading" section here.
+* `puppetlabs/stdlib` (`>= 8.1.0 < 10.0.0`, provides `stdlib::to_toml`)
+* `puppetlabs/cron_core` (`>= 1.0.0 < 3.0.0`)
+* Ruby / RubyGems environment capable of installing `zfs_mgmt`
 
 ### Beginning with zfsmgr
 
-The very basic steps needed for a user to get the module up and running. This
-can include setup steps, if necessary, or it can be an example of the most basic
-use of the module.
+```puppet
+include zfsmgr
+```
 
 ## Usage
 
-Include usage examples for common use cases in the **Usage** section. Show your
-users how to use your module to solve problems, and be sure to include code
-examples. Include three to five examples of the most important or common tasks a
-user can accomplish with your module. Show users how to accomplish more complex
-tasks that involve different types, classes, and functions working in tandem.
+### Basic usage
+
+```puppet
+include zfsmgr
+```
+
+This installs `zfs_mgmt` via the `gem` provider, creates `/etc/zfsmgr/50-puppet.toml` and `/etc/zfsmgr/99-local.toml`, creates `/var/lib/zfs_mgmt`, and configures the three default cron jobs:
+
+* `zfsmgr-snapshot-destroy` (`45 */12 * * *`)
+* `zfsmgr-snapshot-create` (`1 */4 * * *`)
+* `zfsmgr-send-all` (`57 */4 * * *`)
+
+### Configuring datasets via `$config`
+
+```puppet
+class { 'zfsmgr':
+  config => {
+    'mbuffer'      => true,
+    'mbuffer_size' => '512M',
+    'excludes'     => ['mountpoint', 'sharenfs'],
+    'overrides'    => {
+      'canmount' => 'noauto',
+    },
+    'zfs'          => {
+      'tank'      => {
+        'manage'   => true,
+        'policy'   => '10y6m4w30d24h',
+        'snapshot' => true,
+      },
+      'tank/data' => {
+        'send'        => true,
+        'destination' => 'zfs_recv@backup.example.com:backup/tank',
+      },
+    },
+  },
+}
+```
+
+### Purging `/etc/zfsmgr` while keeping `99-local.toml`
+
+```puppet
+class { 'zfsmgr':
+  purge_config_dir => true,
+}
+```
+
+Because `99-local.toml` is declared as a Puppet `file` resource with `replace => false`, Puppet preserves local edits to `99-local.toml` even when `purge_config_dir => true` removes unmanaged files from `/etc/zfsmgr`.
+
+### Adding role/profile config snippets with `zfsmgr::config`
+
+Other roles and profiles can add independent TOML drop-in files under `/etc/zfsmgr`:
+
+```puppet
+zfsmgr::config { '60-backups':
+  config => {
+    'zfs' => {
+      'tank/backups' => {
+        'send'        => true,
+        'destination' => 'zfs_recv@offsite.example.com:offsite/backups',
+      },
+    },
+  },
+}
+```
+
+### Customizing cron schedules
+
+```puppet
+class { 'zfsmgr':
+  snapshot_create_cron => {
+    'minute' => 5,
+    'hour'   => '*',
+  },
+  send_all_cron        => {
+    'hour'       => '*/6',
+    'extra_args' => '--filter ^tank/',
+  },
+}
+```
 
 ## Reference
 
-This section is deprecated. Instead, add reference information to your code as
-Puppet Strings comments, and then use Strings to generate a REFERENCE.md in your
-module. For details on how to add code comments and generate documentation with
-Strings, see the [Puppet Strings documentation][strings] and [style guide][style].
+### Classes
 
-If you aren't ready to use Strings yet, manually create a REFERENCE.md in the
-root of your module directory and list out each of your module's classes,
-defined types, facts, functions, Puppet tasks, task plans, and resource types
-and providers, along with the parameters for each.
+* `zfsmgr`: Main entry point. Parameters:
+  * `manage_package` (`Boolean`, default: `true`)
+  * `package_name` (`String[1]`, default: `'zfs_mgmt'`)
+  * `package_ensure` (`String[1]`, default: `'installed'`)
+  * `package_provider` (`String[1]`, default: `'gem'`)
+  * `config_dir` (`Stdlib::Absolutepath`, default: `'/etc/zfsmgr'`)
+  * `purge_config_dir` (`Boolean`, default: `false`)
+  * `state_dir` (`Stdlib::Absolutepath`, default: `'/var/lib/zfs_mgmt'`)
+  * `owner` (`String[1]`, default: `'root'`)
+  * `group` (`String[1]`, default: `'root'`)
+  * `config_dir_mode` (`Stdlib::Filemode`, default: `'0755'`)
+  * `config_file_mode` (`Stdlib::Filemode`, default: `'0644'`)
+  * `state_dir_mode` (`Stdlib::Filemode`, default: `'0755'`)
+  * `config` (`Hash`, default: `{}`)
+  * `manage_local_config` (`Boolean`, default: `true`)
+  * `include_schema_comment` (`Boolean`, default: `true`)
+  * `schema_url` (`String[1]`, default: `'https://raw.githubusercontent.com/aranc23/zfs_mgmt/master/schema/config.schema.json'`)
+  * `configs` (`Hash[String[1], Hash]`, default: `{}`)
+  * `manage_cron` (`Boolean`, default: `true`)
+  * `binary_path` (`Stdlib::Absolutepath`, default: `'/usr/local/bin/zfsmgr'`)
+  * `cron_path` (`Variant[Undef, String]`, default: `'/sbin:$PATH'`)
+  * `snapshot_destroy_cron` (`Zfsmgr::CronJob`, default: `{}`)
+  * `snapshot_create_cron` (`Zfsmgr::CronJob`, default: `{}`)
+  * `send_all_cron` (`Zfsmgr::CronJob`, default: `{}`)
 
-For each element (class, defined type, function, and so on), list:
+### Defined Types
 
-* The data type, if applicable.
-* A description of what the element does.
-* Valid values, if the data type doesn't make it obvious.
-* Default value, if any.
-
-For example:
-
-```
-### `pet::cat`
-
-#### Parameters
-
-##### `meow`
-
-Enables vocalization in your cat. Valid options: 'string'.
-
-Default: 'medium-loud'.
-```
-
-## Limitations
-
-In the Limitations section, list any incompatibilities, known issues, or other
-warnings.
-
-## Development
-
-In the Development section, tell other users the ground rules for contributing
-to your project and how they should submit their work.
-
-## Release Notes/Contributors/Etc. **Optional**
-
-If you aren't using changelog, put your release notes here (though you should
-consider using changelog). You can also add any additional sections you feel are
-necessary or important to include here. Please use the `##` header.
-
-[docs]: https://docs.openvoxproject.org/openvox/latest/modules_fundamentals.html
-[devkit]: https://docs.openvoxproject.org/ecosystem/latest/devkit/index.html
-[strings]: https://docs.openvoxproject.org/openvox/latest/modules_documentation.html
-[style]: https://docs.openvoxproject.org/openvox/latest/openvox_strings_style.html
+* `zfsmgr::config`: Creates a `<title>.toml` file under `$config_dir`. Parameters:
+  * `ensure` (`Enum['present', 'absent', 'file']`, default: `'file'`)
+  * `config` (`Optional[Hash]`, default: `undef`)
+  * `content` (`Optional[String]`, default: `undef`)
+  * `replace` (`Boolean`, default: `true`)
+  * `config_dir` (`Optional[Stdlib::Absolutepath]`, default: `undef`)
+  * `owner` (`Optional[String[1]]`, default: `undef`)
+  * `group` (`Optional[String[1]]`, default: `undef`)
+  * `mode` (`Optional[Stdlib::Filemode]`, default: `undef`)
+  * `include_schema_comment` (`Optional[Boolean]`, default: `undef`)
