@@ -57,6 +57,13 @@
         "8",
         "9"
       ]
+    },
+    {
+      "operatingsystem": "Fedora",
+      "operatingsystemrelease": [
+        "44",
+        "45"
+      ]
     }
   ],
   "tags": [
